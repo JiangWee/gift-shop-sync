@@ -1,0 +1,16 @@
+# 环境变量文件
+.env
+.env.example
+.env.local
+.env.development
+.env.production
+.env.test
+
+# 其他敏感文件
+*.key
+*.pem
+*.cert
+config.json
+secrets/
+
+node_modules/
