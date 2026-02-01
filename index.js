@@ -68,6 +68,9 @@ async function syncData() {
     console.log('✅ Google Sheets 连接成功:', doc.title);
     // 假设您的产品数据在第一个工作表
     const sheet = doc.sheetsByIndex[0];
+    // 👇 告诉 google-spreadsheet：header 在第 2 行
+    await sheet.loadHeaderRow(2);
+
     const rows = await sheet.getRows();
 
     console.log(`📄 从表格读取到 ${rows.length} 行数据`);
@@ -101,7 +104,13 @@ async function syncData() {
       // 过滤无效行
       .filter(p => p.id && p.name && !Number.isNaN(p.price));
 
+
+      
     console.log(`✅ 处理完成 ${products.length} 个有效产品`);
+    if (products.length === 0) {
+      console.warn('⚠️ 无有效产品，跳过数据库同步');
+      return;
+    }
 
     // 更新到数据库
     const client = await dbPool.connect();
