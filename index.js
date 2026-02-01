@@ -68,12 +68,26 @@ async function syncData() {
     console.log('✅ Google Sheets 连接成功:', doc.title);
     // 假设您的产品数据在第一个工作表
     const sheet = doc.sheetsByIndex[0];
-    // 👇 告诉 google-spreadsheet：header 在第 2 行
-    await sheet.loadHeaderRow(2);
+
+    // ⚠️ 不加载 header，不用 key
+    // await sheet.loadHeaderRow();
 
     const rows = await sheet.getRows();
 
-    console.log(`📄 从表格读取到 ${rows.length} 行数据`);
+    console.log('================ RAW DEBUG START ================');
+    console.log('总行数:', rows.length);
+
+    // 打印前 4 行的“完整内部结构”
+    rows.slice(0, 4).forEach((row, i) => {
+      console.log(`--- Row ${i + 1} ---`);
+      console.log('row._rowNumber:', row._rowNumber);
+      console.log('row._rawData:', row._rawData);
+      console.log('row keys:', Object.keys(row));
+    });
+    console.log('================ RAW DEBUG END ==================');
+
+    // ⚠️ 调试阶段直接 return，不进数据库
+    return;
 
     const products = rows
       .map((row, index) => {
