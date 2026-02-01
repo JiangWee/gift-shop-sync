@@ -78,8 +78,8 @@ async function syncData() {
         if (index < 3) {
           console.log(`示例行数据 ${index + 1}:`, {
             id: row.id,
+            category: row.category,
             name: row.name,
-            price: row.price,
           });
         }
 
