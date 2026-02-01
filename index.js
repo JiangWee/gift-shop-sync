@@ -17,9 +17,11 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
 // Railway 自动提供数据库连接字符串
 const DATABASE_URL = process.env.DATABASE_URL;
-const dbPool = new Pool({ 
+const dbPool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  ssl: {
+    rejectUnauthorized: false,
+  },
 });
 
 console.log('🔧 同步服务启动中...');
@@ -64,41 +66,40 @@ async function syncData() {
     
     await doc.loadInfo();
     console.log('✅ Google Sheets 连接成功:', doc.title);
-
     // 假设您的产品数据在第一个工作表
     const sheet = doc.sheetsByIndex[0];
     const rows = await sheet.getRows();
-    
+
     console.log(`📄 从表格读取到 ${rows.length} 行数据`);
 
-    // 将数据转换为对象数组
-    const products = rows.map((row, index) => {
-      // 调试：打印前几行的数据
-      if (index < 3) {
-        console.log(`示例行数据 ${index + 1}:`, {
-          ID: row.ID || row.id,
-          产品名称: row.产品名称,
-          价格: row.价格
-        });
-      }
-      
-      return {
-        id: row.ID || row.id || (index + 1),
-        name: row.产品名称 || row.name,
-        price: parseFloat(row.价格 || row.price || 0),
-        category: row.分类 || row.category,
-        image_url: row.图片URL || row.image_url,
-        description: row.描述 || row.description,
-        stock: parseInt(row.库存 || row.stock || 0),
-        status: row.状态 || row.status,
-        specs: row.规格 || row.specs,
-        shipping_info: row.配送信息 || row.shipping_info,
-        产品描述: row.产品描述,
-        产品规格: row.产品规格,
-        礼品详情描述: row.礼品详情描述,
-        展示页描述: row.展示页描述
-      };
-    }).filter(product => product.name && product.name.trim() !== ''); // 过滤空行
+    const products = rows
+      .map((row, index) => {
+        // 调试：打印前几行
+        if (index < 3) {
+          console.log(`示例行数据 ${index + 1}:`, {
+            id: row.id,
+            name: row.name,
+            price: row.price,
+          });
+        }
+
+        return {
+          id: Number(row.id),
+          category: row.category || null,
+          name: row.name?.trim(),
+          price: Number(row.price),
+          image_url: row.image_url || null,
+          stock: Number(row.stock) || 0,
+          status: row.status || 'active',
+          display_desc: row.display_desc || null,
+          detail_desc: row.detail_desc || null,
+          product_desc: row.product_desc || null,
+          specs: row.specs || null,
+          shipping_info: row.shipping_info || null,
+        };
+      })
+      // 过滤无效行
+      .filter(p => p.id && p.name && !Number.isNaN(p.price));
 
     console.log(`✅ 处理完成 ${products.length} 个有效产品`);
 
