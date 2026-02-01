@@ -46,19 +46,19 @@ app.get('/sync', async (req, res) => {
 // 主同步函数
 async function syncData() {
   console.log('🔄 开始同步数据...', new Date().toLocaleString());
-  
+
   if (!SPREADSHEET_ID || !GOOGLE_SERVICE_ACCOUNT_EMAIL || !GOOGLE_PRIVATE_KEY) {
     throw new Error('缺少必要的环境变量配置');
   }
 
-  const doc = new GoogleSpreadsheet(SPREADSHEET_ID);
+  const authClient = new JWT({
+    email: GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    key: GOOGLE_PRIVATE_KEY,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+  const doc = new GoogleSpreadsheet(SPREADSHEET_ID, authClient);
 
   try {
-    // 使用服务账户认证
-    await doc.useServiceAccountAuth({
-      client_email: GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      private_key: GOOGLE_PRIVATE_KEY,
-    });
     
     await doc.loadInfo();
     console.log('✅ Google Sheets 连接成功:', doc.title);

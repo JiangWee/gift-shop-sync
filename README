@@ -1,0 +1,17 @@
+本地测试步骤
+步骤 1：安装依赖
+npm install
+步骤 2：测试环境变量
+
+# 测试环境变量加载
+npm run test:sheets
+
+# 测试 Google Sheets 连接
+npm run test:local
+步骤 3：运行完整同步服务
+
+# 开发模式（自动重启）
+npm run dev
+
+# 或生产模式
+npm start
