@@ -1,4 +1,6 @@
 // index.js - 数据同步服务
+const { JWT } = require('google-auth-library');
+
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { Pool } = require('pg');
 const cron = require('node-cron');
