@@ -1,4 +1,7 @@
 // index.js - 数据同步服务
+let isSyncRunning = false;
+
+
 const { JWT } = require('google-auth-library');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { Pool } = require('pg');
@@ -59,21 +62,28 @@ app.get('/sync', async (req, res) => {
  * 11 配送信息
  */
 async function syncData() {
-  console.log('🔄 开始同步数据...', new Date().toLocaleString());
-
-  if (!SPREADSHEET_ID || !GOOGLE_SERVICE_ACCOUNT_EMAIL || !GOOGLE_PRIVATE_KEY) {
-    throw new Error('缺少必要的环境变量配置');
+  if (isSyncRunning) {
+    console.warn('⏳ 同步正在进行中，跳过本次触发');
+    return;
   }
 
-  const authClient = new JWT({
-    email: GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: GOOGLE_PRIVATE_KEY,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-  });
+  isSyncRunning = true;
 
-  const doc = new GoogleSpreadsheet(SPREADSHEET_ID, authClient);
+  console.log('🔄 开始同步数据...', new Date().toLocaleString());
 
   try {
+    if (!SPREADSHEET_ID || !GOOGLE_SERVICE_ACCOUNT_EMAIL || !GOOGLE_PRIVATE_KEY) {
+      throw new Error('缺少必要的环境变量配置');
+    }
+
+    const authClient = new JWT({
+      email: GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      key: GOOGLE_PRIVATE_KEY,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+
+    const doc = new GoogleSpreadsheet(SPREADSHEET_ID, authClient);
+
     // ===== 1. 读取 Google Sheet =====
     await doc.loadInfo();
     console.log('✅ Google Sheets 连接成功:', doc.title);
@@ -111,72 +121,60 @@ async function syncData() {
       return;
     }
 
-    // ===== 2. 写入数据库 =====
-    const client = await dbPool.connect();
+    // ===== 2. 写数据库（使用 pool.query，不手动 client）=====
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT,
+        price NUMERIC(10,2),
+        image_url TEXT,
+        stock INTEGER,
+        status TEXT,
+        display_desc TEXT,
+        gift_detail_desc TEXT,
+        product_desc TEXT,
+        product_specs TEXT,
+        shipping_info TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
-    try {
-      await client.query('BEGIN');
+    await dbPool.query('TRUNCATE TABLE products;');
 
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS products (
-          id INTEGER PRIMARY KEY,
-          name TEXT NOT NULL,
-          category TEXT,
-          price NUMERIC(10,2),
-          image_url TEXT,
-          stock INTEGER,
-          status TEXT,
-          display_desc TEXT,
-          gift_detail_desc TEXT,
-          product_desc TEXT,
-          product_specs TEXT,
-          shipping_info TEXT,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
+    const insertSQL = `
+      INSERT INTO products (
+        id, name, category, price, image_url, stock, status,
+        display_desc, gift_detail_desc, product_desc, product_specs, shipping_info
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    `;
 
-      await client.query('TRUNCATE TABLE products;');
-
-      const insertSQL = `
-        INSERT INTO products (
-          id, name, category, price, image_url, stock, status,
-          display_desc, gift_detail_desc, product_desc, product_specs, shipping_info
-        ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
-        )
-      `;
-
-      for (const p of products) {
-        await client.query(insertSQL, [
-          p.id,
-          p.name,
-          p.category,
-          p.price,
-          p.image_url,
-          p.stock,
-          p.status,
-          p.display_desc,
-          p.gift_detail_desc,
-          p.product_desc,
-          p.product_specs,
-          p.shipping_info,
-        ]);
-      }
-
-      await client.query('COMMIT');
-      console.log(`✅ 数据同步成功！共写入 ${products.length} 条产品数据`);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      console.error('❌ 数据库操作失败:', err);
-      throw err;
-    } finally {
-      client.release();
+    for (const p of products) {
+      await dbPool.query(insertSQL, [
+        p.id,
+        p.name,
+        p.category,
+        p.price,
+        p.image_url,
+        p.stock,
+        p.status,
+        p.display_desc,
+        p.gift_detail_desc,
+        p.product_desc,
+        p.product_specs,
+        p.shipping_info,
+      ]);
     }
+
+    console.log(`✅ 数据同步成功！共写入 ${products.length} 条产品数据`);
+
   } catch (error) {
     console.error('❌ 数据同步失败:', error);
-    throw error;
+  } finally {
+    isSyncRunning = false;
   }
 }
+
 
 // ===== 定时任务 =====
 const SYNC_INTERVAL = process.env.SYNC_INTERVAL || '*/5 * * * *';
