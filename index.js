@@ -1,6 +1,5 @@
 // index.js - 数据同步服务
 const { JWT } = require('google-auth-library');
-
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { Pool } = require('pg');
 const cron = require('node-cron');
@@ -10,34 +9,31 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// 配置信息（从环境变量读取）
+// ===== 环境变量 =====
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-
-// Railway 自动提供数据库连接字符串
 const DATABASE_URL = process.env.DATABASE_URL;
+
+// ✅ Railway 正确的数据库连接方式（重点）
 const dbPool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
 });
 
 console.log('🔧 同步服务启动中...');
 console.log('📊 数据库连接:', DATABASE_URL ? '已配置' : '未配置');
 console.log('📋 表格ID:', SPREADSHEET_ID || '未配置');
 
-// 健康检查端点
+// ===== 健康检查 =====
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     service: 'gift-shop-sync',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 });
 
-// 手动触发同步的端点
+// ===== 手动同步 =====
 app.get('/sync', async (req, res) => {
   try {
     await syncData();
@@ -47,21 +43,21 @@ app.get('/sync', async (req, res) => {
   }
 });
 
-// google sheets 表头信息
-// 0  ID
-// 1  分类
-// 2  产品名称
-// 3  价格
-// 4  图片URL
-// 5  库存
-// 6  状态
-// 7  展示页描述
-// 8  礼品详情描述
-// 9  产品描述
-// 10 产品规格
-// 11 配送信息
-
-// 主同步函数
+/**
+ * Google Sheets 表头顺序
+ * 0  ID
+ * 1  分类
+ * 2  产品名称
+ * 3  价格
+ * 4  图片URL
+ * 5  库存
+ * 6  状态
+ * 7  展示页描述
+ * 8  礼品详情描述
+ * 9  产品描述
+ * 10 产品规格
+ * 11 配送信息
+ */
 async function syncData() {
   console.log('🔄 开始同步数据...', new Date().toLocaleString());
 
@@ -99,7 +95,6 @@ async function syncData() {
           image_url: raw[4] || null,
           stock: Number(raw[5]) || 0,
           status: raw[6] || null,
-
           display_desc: raw[7] || null,
           gift_detail_desc: raw[8] || null,
           product_desc: raw[9] || null,
@@ -122,7 +117,6 @@ async function syncData() {
     try {
       await client.query('BEGIN');
 
-      // 建表（结构与 JS 完全一致）
       await client.query(`
         CREATE TABLE IF NOT EXISTS products (
           id INTEGER PRIMARY KEY,
@@ -132,35 +126,21 @@ async function syncData() {
           image_url TEXT,
           stock INTEGER,
           status TEXT,
-
           display_desc TEXT,
           gift_detail_desc TEXT,
           product_desc TEXT,
           product_specs TEXT,
           shipping_info TEXT,
-
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
 
-      // 清空表
       await client.query('TRUNCATE TABLE products;');
 
-      // 插入数据
       const insertSQL = `
         INSERT INTO products (
-          id,
-          name,
-          category,
-          price,
-          image_url,
-          stock,
-          status,
-          display_desc,
-          gift_detail_desc,
-          product_desc,
-          product_specs,
-          shipping_info
+          id, name, category, price, image_url, stock, status,
+          display_desc, gift_detail_desc, product_desc, product_specs, shipping_info
         ) VALUES (
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
         )
@@ -185,7 +165,6 @@ async function syncData() {
 
       await client.query('COMMIT');
       console.log(`✅ 数据同步成功！共写入 ${products.length} 条产品数据`);
-
     } catch (err) {
       await client.query('ROLLBACK');
       console.error('❌ 数据库操作失败:', err);
@@ -193,36 +172,29 @@ async function syncData() {
     } finally {
       client.release();
     }
-
   } catch (error) {
     console.error('❌ 数据同步失败:', error);
     throw error;
   }
 }
 
-
-// 每5分钟同步一次（可以通过环境变量控制）
+// ===== 定时任务 =====
 const SYNC_INTERVAL = process.env.SYNC_INTERVAL || '*/5 * * * *';
 cron.schedule(SYNC_INTERVAL, syncData);
 
-// 服务启动后立即同步一次
+// 启动后立即同步一次
 setTimeout(() => {
-  syncData().catch(error => {
-    console.error('❌ 初始同步失败:', error);
-  });
-}, 5000); // 延迟5秒启动，确保服务完全启动
+  syncData().catch(err => console.error('❌ 初始同步失败:', err));
+}, 5000);
 
-// 启动Express服务
+// ===== 启动服务 =====
 app.listen(PORT, () => {
-  console.log(`🚀 同步服务运行在端口 ${PORT}`);
-  console.log(`📊 健康检查: http://localhost:${PORT}/health`);
-  console.log(`🔄 手动同步: http://localhost:${PORT}/sync`);
-  console.log(`⏰ 同步间隔: ${SYNC_INTERVAL}`);
+  console.log(`🚀 服务运行在端口 ${PORT}`);
 });
 
-// 优雅关闭
+// ===== 优雅关闭 =====
 process.on('SIGTERM', async () => {
-  console.log('🛑 收到关闭信号，正在清理资源...');
+  console.log('🛑 服务关闭中...');
   await dbPool.end();
   process.exit(0);
 });
