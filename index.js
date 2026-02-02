@@ -47,6 +47,20 @@ app.get('/sync', async (req, res) => {
   }
 });
 
+// google sheets 表头信息
+// 0  ID
+// 1  分类
+// 2  产品名称
+// 3  价格
+// 4  图片URL
+// 5  库存
+// 6  状态
+// 7  展示页描述
+// 8  礼品详情描述
+// 9  产品描述
+// 10 产品规格
+// 11 配送信息
+
 // 主同步函数
 async function syncData() {
   console.log('🔄 开始同步数据...', new Date().toLocaleString());
@@ -60,121 +74,118 @@ async function syncData() {
     key: GOOGLE_PRIVATE_KEY,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
+
   const doc = new GoogleSpreadsheet(SPREADSHEET_ID, authClient);
 
   try {
-    
+    // ===== 1. 读取 Google Sheet =====
     await doc.loadInfo();
     console.log('✅ Google Sheets 连接成功:', doc.title);
-    // 假设您的产品数据在第一个工作表
+
     const sheet = doc.sheetsByIndex[0];
-
-    // ⚠️ 不加载 header，不用 key
-    // await sheet.loadHeaderRow();
-
     const rows = await sheet.getRows();
 
-    console.log('================ RAW DEBUG START ================');
-    console.log('总行数:', rows.length);
-
-    // 打印前 4 行的“完整内部结构”
-    rows.slice(0, 4).forEach((row, i) => {
-      console.log(`--- Row ${i + 1} ---`);
-      console.log('row._rowNumber:', row._rowNumber);
-      console.log('row._rawData:', row._rawData);
-      console.log('row keys:', Object.keys(row));
-    });
-    console.log('================ RAW DEBUG END ==================');
-
-    // ⚠️ 调试阶段直接 return，不进数据库
-    return;
+    console.log(`📄 从表格读取到 ${rows.length} 行数据`);
 
     const products = rows
-      .map((row, index) => {
-        // 调试：打印前几行
-        if (index < 3) {
-          console.log(`示例行数据 ${index + 1}:`, {
-            id: row.id,
-            category: row.category,
-            name: row.name,
-          });
-        }
+      .map(row => {
+        const raw = row._rawData;
 
         return {
-          id: Number(row.id),
-          category: row.category || null,
-          name: row.name?.trim(),
-          price: Number(row.price),
-          image_url: row.image_url || null,
-          stock: Number(row.stock) || 0,
-          status: row.status || 'active',
-          display_desc: row.display_desc || null,
-          detail_desc: row.detail_desc || null,
-          product_desc: row.product_desc || null,
-          specs: row.specs || null,
-          shipping_info: row.shipping_info || null,
+          id: Number(raw[0]),
+          category: raw[1] || null,
+          name: raw[2] || null,
+          price: Number(String(raw[3] || '').replace(/,/g, '')),
+          image_url: raw[4] || null,
+          stock: Number(raw[5]) || 0,
+          status: raw[6] || null,
+
+          display_desc: raw[7] || null,
+          gift_detail_desc: raw[8] || null,
+          product_desc: raw[9] || null,
+          product_specs: raw[10] || null,
+          shipping_info: raw[11] || null,
         };
       })
-      // 过滤无效行
-      .filter(p => p.id && p.name && !Number.isNaN(p.price));
+      .filter(p => p.id && p.name);
 
-
-      
     console.log(`✅ 处理完成 ${products.length} 个有效产品`);
+
     if (products.length === 0) {
       console.warn('⚠️ 无有效产品，跳过数据库同步');
       return;
     }
 
-    // 更新到数据库
+    // ===== 2. 写入数据库 =====
     const client = await dbPool.connect();
-    
+
     try {
       await client.query('BEGIN');
 
-      // 检查 products 表是否存在，如果不存在则创建
+      // 建表（结构与 JS 完全一致）
       await client.query(`
         CREATE TABLE IF NOT EXISTS products (
           id INTEGER PRIMARY KEY,
-          name VARCHAR(255) NOT NULL,
-          price DECIMAL(10,2) NOT NULL,
-          category VARCHAR(100),
-          image_url VARCHAR(500),
-          description TEXT,
-          stock INTEGER DEFAULT 0,
-          status VARCHAR(50) DEFAULT '上架',
-          specs TEXT,
+          name TEXT NOT NULL,
+          category TEXT,
+          price NUMERIC(10,2),
+          image_url TEXT,
+          stock INTEGER,
+          status TEXT,
+
+          display_desc TEXT,
+          gift_detail_desc TEXT,
+          product_desc TEXT,
+          product_specs TEXT,
           shipping_info TEXT,
-          产品描述 TEXT,
-          产品规格 TEXT,
-          礼品详情描述 TEXT,
-          展示页描述 TEXT,
+
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
 
-      // 清空现有产品表
-      await client.query('TRUNCATE TABLE products RESTART IDENTITY CASCADE;');
+      // 清空表
+      await client.query('TRUNCATE TABLE products;');
 
-      // 插入新数据
-      for (const product of products) {
-        const query = `
-          INSERT INTO products (
-            id, name, price, category, image_url, description, 
-            stock, status, specs, shipping_info, 产品描述, 产品规格, 礼品详情描述, 展示页描述
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-        `;
-        await client.query(query, [
-          product.id, product.name, product.price, product.category,
-          product.image_url, product.description, product.stock,
-          product.status, product.specs, product.shipping_info,
-          product.产品描述, product.产品规格, product.礼品详情描述, product.展示页描述
+      // 插入数据
+      const insertSQL = `
+        INSERT INTO products (
+          id,
+          name,
+          category,
+          price,
+          image_url,
+          stock,
+          status,
+          display_desc,
+          gift_detail_desc,
+          product_desc,
+          product_specs,
+          shipping_info
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+        )
+      `;
+
+      for (const p of products) {
+        await client.query(insertSQL, [
+          p.id,
+          p.name,
+          p.category,
+          p.price,
+          p.image_url,
+          p.stock,
+          p.status,
+          p.display_desc,
+          p.gift_detail_desc,
+          p.product_desc,
+          p.product_specs,
+          p.shipping_info,
         ]);
       }
 
       await client.query('COMMIT');
-      console.log(`✅ 数据同步成功！共同步 ${products.length} 个产品到数据库。`);
-      
+      console.log(`✅ 数据同步成功！共写入 ${products.length} 条产品数据`);
+
     } catch (err) {
       await client.query('ROLLBACK');
       console.error('❌ 数据库操作失败:', err);
@@ -188,6 +199,7 @@ async function syncData() {
     throw error;
   }
 }
+
 
 // 每5分钟同步一次（可以通过环境变量控制）
 const SYNC_INTERVAL = process.env.SYNC_INTERVAL || '*/5 * * * *';
