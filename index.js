@@ -19,7 +19,6 @@ app.use(cors({
   ],
 }));
 
-const express = require('express');
 const cron = require('node-cron');
 const mysql = require('mysql2/promise');
 const { JWT } = require('google-auth-library');
