@@ -4,6 +4,15 @@ let isSyncRunning = false;
 
 require('dotenv').config();
 
+const cors = require('cors');
+
+app.use(cors({
+  origin: [
+    'https://www.giftbuybuy.com',
+    'https://giftbuybuy.com'
+  ],
+}));
+
 const express = require('express');
 const cron = require('node-cron');
 const mysql = require('mysql2/promise');
@@ -51,6 +60,42 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// 获取产品列表（只返回上架商品）
+app.get('/api/products', async (req, res) => {
+  try {
+    const [rows] = await dbPool.query(`
+      SELECT
+        id,
+        name,
+        category,
+        price,
+        image_url,
+        stock,
+        status,
+        display_desc,
+        gift_detail_desc,
+        product_desc,
+        product_specs,
+        shipping_info
+      FROM products
+      WHERE status = '上架'
+      ORDER BY id ASC
+    `);
+
+    res.json({
+      success: true,
+      data: rows,
+    });
+  } catch (error) {
+    console.error('❌ 获取产品失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '获取产品失败',
+    });
+  }
+});
+
 
 // ===== 手动同步 =====
 app.get('/sync', async (req, res) => {
