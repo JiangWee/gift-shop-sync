@@ -4,13 +4,18 @@ let isSyncRunning = false;
 
 require('dotenv').config();
 
+const express = require('express');
 const cors = require('cors');
 
+const app = express();   // ✅ 先创建 app
+const PORT = process.env.PORT || 8080;
+
+// ✅ 再用 app.use
 app.use(cors({
   origin: [
     'http://localhost:8000',
     'https://www.giftbuybuy.com',
-    'https://giftbuybuy.com'
+    'https://giftbuybuy.com',
   ],
 }));
 
@@ -20,8 +25,6 @@ const mysql = require('mysql2/promise');
 const { JWT } = require('google-auth-library');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 
-const app = express();
-const PORT = process.env.PORT || 8080;
 
 // ===== 环境变量 =====
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
