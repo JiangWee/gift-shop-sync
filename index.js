@@ -8,6 +8,7 @@ const cors = require('cors');
 
 app.use(cors({
   origin: [
+    'http://localhost:8000',
     'https://www.giftbuybuy.com',
     'https://giftbuybuy.com'
   ],
