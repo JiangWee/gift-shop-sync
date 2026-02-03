@@ -1,30 +1,46 @@
-// index.js - 数据同步服务
+// index.js - 数据同步服务（MySQL 版本）
+
 let isSyncRunning = false;
 
-
-const { JWT } = require('google-auth-library');
-const { GoogleSpreadsheet } = require('google-spreadsheet');
-const { Pool } = require('pg');
-const cron = require('node-cron');
-const express = require('express');
 require('dotenv').config();
 
+const express = require('express');
+const cron = require('node-cron');
+const mysql = require('mysql2/promise');
+const { JWT } = require('google-auth-library');
+const { GoogleSpreadsheet } = require('google-spreadsheet');
+
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 8080;
 
 // ===== 环境变量 =====
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const DATABASE_URL = process.env.DATABASE_URL;
 
-// ✅ Railway 正确的数据库连接方式（重点）
-const dbPool = new Pool({
-  connectionString: DATABASE_URL,
+// Railway MySQL（直接用它给的）
+const {
+  MYSQLHOST,
+  MYSQLUSER,
+  MYSQLPASSWORD,
+  MYSQLDATABASE,
+  MYSQLPORT,
+} = process.env;
+
+// ===== MySQL 连接池 =====
+const dbPool = mysql.createPool({
+  host: MYSQLHOST,
+  user: MYSQLUSER,
+  password: MYSQLPASSWORD,
+  database: MYSQLDATABASE,
+  port: MYSQLPORT || 3306,
+  waitForConnections: true,
+  connectionLimit: 5,
+  queueLimit: 0,
 });
 
 console.log('🔧 同步服务启动中...');
-console.log('📊 数据库连接:', DATABASE_URL ? '已配置' : '未配置');
+console.log('📊 数据库连接:', MYSQLHOST ? '已配置(MySQL)' : '未配置');
 console.log('📋 表格ID:', SPREADSHEET_ID || '未配置');
 
 // ===== 健康检查 =====
@@ -41,13 +57,13 @@ app.get('/sync', async (req, res) => {
   try {
     await syncData();
     res.json({ success: true, message: '手动同步完成' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
 /**
- * Google Sheets 表头顺序
+ * Google Sheets 表头顺序（严格按 index）
  * 0  ID
  * 1  分类
  * 2  产品名称
@@ -68,14 +84,14 @@ async function syncData() {
   }
 
   isSyncRunning = true;
-
   console.log('🔄 开始同步数据...', new Date().toLocaleString());
 
   try {
     if (!SPREADSHEET_ID || !GOOGLE_SERVICE_ACCOUNT_EMAIL || !GOOGLE_PRIVATE_KEY) {
-      throw new Error('缺少必要的环境变量配置');
+      throw new Error('缺少 Google Sheets 相关环境变量');
     }
 
+    // ===== 1. 读取 Google Sheets =====
     const authClient = new JWT({
       email: GOOGLE_SERVICE_ACCOUNT_EMAIL,
       key: GOOGLE_PRIVATE_KEY,
@@ -83,9 +99,8 @@ async function syncData() {
     });
 
     const doc = new GoogleSpreadsheet(SPREADSHEET_ID, authClient);
-
-    // ===== 1. 读取 Google Sheet =====
     await doc.loadInfo();
+
     console.log('✅ Google Sheets 连接成功:', doc.title);
 
     const sheet = doc.sheetsByIndex[0];
@@ -121,66 +136,81 @@ async function syncData() {
       return;
     }
 
-    // ===== 2. 写数据库（使用 pool.query，不手动 client）=====
-    await dbPool.query(`
-      CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        category TEXT,
-        price NUMERIC(10,2),
-        image_url TEXT,
-        stock INTEGER,
-        status TEXT,
-        display_desc TEXT,
-        gift_detail_desc TEXT,
-        product_desc TEXT,
-        product_specs TEXT,
-        shipping_info TEXT,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+    // ===== 2. 写入 MySQL =====
+    const conn = await dbPool.getConnection();
 
-    await dbPool.query('TRUNCATE TABLE products;');
+    try {
+      await conn.beginTransaction();
 
-    const insertSQL = `
-      INSERT INTO products (
-        id, name, category, price, image_url, stock, status,
-        display_desc, gift_detail_desc, product_desc, product_specs, shipping_info
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-    `;
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS products (
+          id INT PRIMARY KEY,
+          name VARCHAR(255) NOT NULL,
+          category VARCHAR(255),
+          price DECIMAL(10,2),
+          image_url TEXT,
+          stock INT,
+          status VARCHAR(50),
 
-    for (const p of products) {
-      await dbPool.query(insertSQL, [
-        p.id,
-        p.name,
-        p.category,
-        p.price,
-        p.image_url,
-        p.stock,
-        p.status,
-        p.display_desc,
-        p.gift_detail_desc,
-        p.product_desc,
-        p.product_specs,
-        p.shipping_info,
-      ]);
+          display_desc TEXT,
+          gift_detail_desc TEXT,
+          product_desc TEXT,
+          product_specs TEXT,
+          shipping_info TEXT,
+
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ON UPDATE CURRENT_TIMESTAMP
+        )
+      `);
+
+      await conn.query('TRUNCATE TABLE products');
+
+      const insertSQL = `
+        INSERT INTO products (
+          id, name, category, price, image_url, stock, status,
+          display_desc, gift_detail_desc, product_desc, product_specs, shipping_info
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+
+      for (const p of products) {
+        await conn.query(insertSQL, [
+          p.id,
+          p.name,
+          p.category,
+          p.price,
+          p.image_url,
+          p.stock,
+          p.status,
+          p.display_desc,
+          p.gift_detail_desc,
+          p.product_desc,
+          p.product_specs,
+          p.shipping_info,
+        ]);
+      }
+
+      await conn.commit();
+      console.log(`✅ 数据同步成功！共写入 ${products.length} 条产品数据`);
+
+    } catch (dbErr) {
+      await conn.rollback();
+      throw dbErr;
+    } finally {
+      conn.release();
     }
 
-    console.log(`✅ 数据同步成功！共写入 ${products.length} 条产品数据`);
-
-  } catch (error) {
-    console.error('❌ 数据同步失败:', error);
+  } catch (err) {
+    console.error('❌ 数据同步失败:', err);
   } finally {
     isSyncRunning = false;
   }
 }
 
-
 // ===== 定时任务 =====
 const SYNC_INTERVAL = process.env.SYNC_INTERVAL || '*/5 * * * *';
 cron.schedule(SYNC_INTERVAL, syncData);
 
-// 启动后立即同步一次
+// 启动后自动同步一次
 setTimeout(() => {
   syncData().catch(err => console.error('❌ 初始同步失败:', err));
 }, 5000);
