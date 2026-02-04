@@ -64,6 +64,18 @@ app.get('/health', (req, res) => {
   });
 });
 
+app.get('/__drop_products_table', async (req, res) => {
+  try {
+    const conn = await dbPool.getConnection();
+    await conn.query('DROP TABLE IF EXISTS products');
+    conn.release();
+    res.json({ success: true, message: 'products 表已删除' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
 function mapProductByLang(row, lang = 'zh') {
   const safeLang = lang === 'en' ? 'en' : 'zh';
 
