@@ -64,39 +64,40 @@ app.get('/health', (req, res) => {
   });
 });
 
+function mapProductByLang(row, lang = 'zh') {
+  const safeLang = lang === 'en' ? 'en' : 'zh';
+
+  return {
+    id: row.id,
+    category: row.category,
+    price: row.price,
+    image_url: row.image_url,
+    stock: row.stock,
+    status: row.status,
+
+    name: row[`name_${safeLang}`] || row.name_zh,
+    display_desc: row[`display_desc_${safeLang}`] || '',
+    gift_detail_desc: row[`gift_detail_desc_${safeLang}`] || '',
+    product_desc: row[`product_desc_${safeLang}`] || '',
+    product_specs: row[`product_specs_${safeLang}`] || '',
+    shipping_info: row[`shipping_info_${safeLang}`] || '',
+  };
+}
+
 // 获取产品列表（只返回上架商品）
 app.get('/api/products', async (req, res) => {
-  try {
-    const [rows] = await dbPool.query(`
-      SELECT
-        id,
-        name,
-        category,
-        price,
-        image_url,
-        stock,
-        status,
-        display_desc,
-        gift_detail_desc,
-        product_desc,
-        product_specs,
-        shipping_info
-      FROM products
-      WHERE status = '上架'
-      ORDER BY id ASC
-    `);
+  const lang = String(req.query.lang || 'zh').toLowerCase();
 
-    res.json({
-      success: true,
-      data: rows,
-    });
-  } catch (error) {
-    console.error('❌ 获取产品失败:', error);
-    res.status(500).json({
-      success: false,
-      message: '获取产品失败',
-    });
-  }
+  const [rows] = await dbPool.query(
+    'SELECT * FROM products WHERE status = "上架"'
+  );
+
+  const data = rows.map(row => mapProductByLang(row, lang));
+
+  res.json({
+    success: true,
+    data
+  });
 });
 
 
@@ -124,6 +125,12 @@ app.get('/sync', async (req, res) => {
  * 9  产品描述
  * 10 产品规格
  * 11 配送信息
+ * 12 英文产品名称
+ * 13 英文展示页描述
+ * 14 英文礼品详情描述
+ * 15 英文产品描述
+ * 16 英文产品规格
+ * 17 英文配送信息
  */
 async function syncData() {
   if (isSyncRunning) {
@@ -163,19 +170,31 @@ async function syncData() {
         return {
           id: Number(raw[0]),
           category: raw[1] || null,
-          name: raw[2] || null,
+
+          // ===== 中文 =====
+          name_zh: raw[2] || null,
+          display_desc_zh: raw[7] || null,
+          gift_detail_desc_zh: raw[8] || null,
+          product_desc_zh: raw[9] || null,
+          product_specs_zh: raw[10] || null,
+          shipping_info_zh: raw[11] || null,
+
+          // ===== 英文 =====
+          name_en: raw[12] || null,
+          display_desc_en: raw[13] || null,
+          gift_detail_desc_en: raw[14] || null,
+          product_desc_en: raw[15] || null,
+          product_specs_en: raw[16] || null,
+          shipping_info_en: raw[17] || null,
+
+          // ===== 通用 =====
           price: Number(String(raw[3] || '').replace(/,/g, '')),
           image_url: raw[4] || null,
           stock: Number(raw[5]) || 0,
           status: raw[6] || null,
-          display_desc: raw[7] || null,
-          gift_detail_desc: raw[8] || null,
-          product_desc: raw[9] || null,
-          product_specs: raw[10] || null,
-          shipping_info: raw[11] || null,
         };
       })
-      .filter(p => p.id && p.name);
+      .filter(p => p.id && p.name_zh);
 
     console.log(`✅ 处理完成 ${products.length} 个有效产品`);
 
@@ -193,18 +212,27 @@ async function syncData() {
       await conn.query(`
         CREATE TABLE IF NOT EXISTS products (
           id INT PRIMARY KEY,
-          name VARCHAR(255) NOT NULL,
           category VARCHAR(255),
           price DECIMAL(10,2),
           image_url TEXT,
           stock INT,
           status VARCHAR(50),
 
-          display_desc TEXT,
-          gift_detail_desc TEXT,
-          product_desc TEXT,
-          product_specs TEXT,
-          shipping_info TEXT,
+          -- 中文
+          name_zh VARCHAR(255),
+          display_desc_zh TEXT,
+          gift_detail_desc_zh TEXT,
+          product_desc_zh TEXT,
+          product_specs_zh TEXT,
+          shipping_info_zh TEXT,
+
+          -- 英文
+          name_en VARCHAR(255),
+          display_desc_en TEXT,
+          gift_detail_desc_en TEXT,
+          product_desc_en TEXT,
+          product_specs_en TEXT,
+          shipping_info_en TEXT,
 
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ON UPDATE CURRENT_TIMESTAMP
@@ -215,25 +243,38 @@ async function syncData() {
 
       const insertSQL = `
         INSERT INTO products (
-          id, name, category, price, image_url, stock, status,
-          display_desc, gift_detail_desc, product_desc, product_specs, shipping_info
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, category, price, image_url, stock, status,
+
+          name_zh, display_desc_zh, gift_detail_desc_zh,
+          product_desc_zh, product_specs_zh, shipping_info_zh,
+
+          name_en, display_desc_en, gift_detail_desc_en,
+          product_desc_en, product_specs_en, shipping_info_en
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       for (const p of products) {
         await conn.query(insertSQL, [
           p.id,
-          p.name,
           p.category,
           p.price,
           p.image_url,
           p.stock,
           p.status,
-          p.display_desc,
-          p.gift_detail_desc,
-          p.product_desc,
-          p.product_specs,
-          p.shipping_info,
+
+          p.name_zh,
+          p.display_desc_zh,
+          p.gift_detail_desc_zh,
+          p.product_desc_zh,
+          p.product_specs_zh,
+          p.shipping_info_zh,
+
+          p.name_en,
+          p.display_desc_en,
+          p.gift_detail_desc_en,
+          p.product_desc_en,
+          p.product_specs_en,
+          p.shipping_info_en,
         ]);
       }
 
