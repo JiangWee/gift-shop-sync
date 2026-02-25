@@ -15,6 +15,7 @@ app.use(cors({
   origin: [
     'http://localhost:8000',
     'https://www.giftbuybuy.com',
+    'https://www.giftbuybuy.cn',
     'https://giftbuybuy.com',
   ],
 }));
