@@ -20,7 +20,7 @@ app.use(cors({
   ],
 }));
 
-const cron = require('node-cron');
+// const cron = require('node-cron');
 const mysql = require('mysql2/promise');
 const { JWT } = require('google-auth-library');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
@@ -65,17 +65,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.get('/__drop_products_table', async (req, res) => {
-  try {
-    const conn = await dbPool.getConnection();
-    await conn.query('DROP TABLE IF EXISTS products');
-    conn.release();
-    res.json({ success: true, message: 'products 表已删除' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
 
 function mapProductByLang(row, lang = 'zh') {
   const safeLang = lang === 'en' ? 'en' : 'zh';
@@ -115,12 +104,17 @@ app.get('/api/products', async (req, res) => {
 
 
 // ===== 手动同步 =====
-app.get('/sync', async (req, res) => {
+app.post('/sync', async (req, res) => {
+  if (req.headers['x-secret'] !== process.env.SYNC_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
   try {
     await syncData();
-    res.json({ success: true, message: '手动同步完成' });
+    res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Sync failed' });
   }
 });
 
@@ -252,18 +246,32 @@ async function syncData() {
         )
       `);
 
-      await conn.query('TRUNCATE TABLE products');
-
       const insertSQL = `
         INSERT INTO products (
           id, category, price, image_url, stock, status,
-
           name_zh, display_desc_zh, gift_detail_desc_zh,
           product_desc_zh, product_specs_zh, shipping_info_zh,
-
           name_en, display_desc_en, gift_detail_desc_en,
           product_desc_en, product_specs_en, shipping_info_en
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          category = VALUES(category),
+          price = VALUES(price),
+          image_url = VALUES(image_url),
+          stock = VALUES(stock),
+          status = VALUES(status),
+          name_zh = VALUES(name_zh),
+          display_desc_zh = VALUES(display_desc_zh),
+          gift_detail_desc_zh = VALUES(gift_detail_desc_zh),
+          product_desc_zh = VALUES(product_desc_zh),
+          product_specs_zh = VALUES(product_specs_zh),
+          shipping_info_zh = VALUES(shipping_info_zh),
+          name_en = VALUES(name_en),
+          display_desc_en = VALUES(display_desc_en),
+          gift_detail_desc_en = VALUES(gift_detail_desc_en),
+          product_desc_en = VALUES(product_desc_en),
+          product_specs_en = VALUES(product_specs_en),
+          shipping_info_en = VALUES(shipping_info_en)
       `;
 
       for (const p of products) {
@@ -308,14 +316,14 @@ async function syncData() {
   }
 }
 
-// ===== 定时任务 =====
-const SYNC_INTERVAL = process.env.SYNC_INTERVAL || '*/5 * * * *';
-cron.schedule(SYNC_INTERVAL, syncData);
+// // ===== 定时任务 =====
+// const SYNC_INTERVAL = process.env.SYNC_INTERVAL || '*/5 * * * *';
+// cron.schedule(SYNC_INTERVAL, syncData);
 
-// 启动后自动同步一次
-setTimeout(() => {
-  syncData().catch(err => console.error('❌ 初始同步失败:', err));
-}, 5000);
+// // 启动后自动同步一次
+// setTimeout(() => {
+//   syncData().catch(err => console.error('❌ 初始同步失败:', err));
+// }, 5000);
 
 // ===== 启动服务 =====
 app.listen(PORT, () => {
