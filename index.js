@@ -104,17 +104,49 @@ app.get('/api/products', async (req, res) => {
 
 
 // ===== 手动同步 =====
+// 在 POST /sync 接口处添加详细日志
 app.post('/sync', async (req, res) => {
-  if (req.headers['x-secret'] !== process.env.SYNC_SECRET) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-
   try {
+    const secret = req.headers['x-secret'];
+    const expectedSecret = process.env.SYNC_SECRET;
+    
+    console.log('📡 收到同步请求:', {
+      timestamp: new Date().toISOString(),
+      headers: req.headers,
+      body: req.body,
+      ip: req.ip,
+      userAgent: req.get('User-Agent')
+    });
+    
+    // 验证密钥
+    if (!secret || secret !== expectedSecret) {
+      console.warn('❌ 同步请求密钥验证失败');
+      console.warn('收到密钥:', secret ? '有值' : '无');
+      console.warn('期望密钥:', expectedSecret ? '已设置' : '未设置');
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Invalid secret' 
+      });
+    }
+    
+    console.log('✅ 密钥验证通过，开始同步数据...');
+    
+    // 执行同步
     await syncData();
-    res.json({ success: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Sync failed' });
+    
+    console.log('✅ 同步完成');
+    res.status(200).json({ 
+      success: true, 
+      message: 'Sync completed successfully',
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ 同步请求处理失败:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
   }
 });
 
